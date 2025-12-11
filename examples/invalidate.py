@@ -32,7 +32,7 @@ def _user_key_builder(request: Request) -> str:
     return _user_cache_key(user_id)
 
 
-@router.post(path='/', response_model=User)
+@router.post(path='/')
 def create_user(user_input: UserInput) -> User:
     """Create new user."""
     user_id = max(users.keys()) + 1 if users else 1
@@ -42,7 +42,7 @@ def create_user(user_input: UserInput) -> User:
 
 
 @cache(key_builder=_user_key_builder)
-@router.get(path='/{user_id}', response_model=User)
+@router.get(path='/{user_id}')
 def get_user(user_id: int) -> User:
     """Return cached user."""
     try:
@@ -51,7 +51,7 @@ def get_user(user_id: int) -> User:
         raise HTTPException(404) from exc
 
 
-@router.patch(path='/{user_id}', response_model=User)
+@router.patch(path='/{user_id}')
 async def patch_user(user_id: int, user_input: UserInput) -> User:
     """Create new user."""
     try:

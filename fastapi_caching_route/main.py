@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from aiocache import BaseCache
     from fastapi.params import Depends
+    from fastapi.types import DependencyCacheKey
     from starlette.datastructures import MutableHeaders
     from typing_extensions import Doc
 
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     class CacheParamsBase(TypedDict):
         """Cache parameters to be passed to aiocache."""
 
-        namespace: NotRequired[str]
+        namespace: NotRequired[str | None]
         ttl: NotRequired[float]
 
     class CacheParams(CacheParamsBase):
@@ -58,7 +59,7 @@ if TYPE_CHECKING:
 
     _CacheEndpoints = dict[Callable, CacheParams]
     _CacheMethodParams = tuple[KeyBuilder, CacheParamsBase, Dependant | None]
-    _DependencyCache = dict[tuple[Callable[..., Any], tuple[str]], Any]
+    _DependencyCache = dict[DependencyCacheKey, Any]
     _T = TypeVar('_T')
     _P = ParamSpec('_P')
 
@@ -362,8 +363,8 @@ class _CachedDependency:
 class _CachedDependencyProvider:
     def __init__(self, cache: _DependencyCache) -> None:
         self.dependency_overrides = {
-            call: _CachedDependency(res)
-            for (call, security_scopes), res in cache.items()
+            key[0]: _CachedDependency(res)
+            for key, res in cache.items()
         }  # fmt: skip
 
 
@@ -427,8 +428,7 @@ def _build_cached_response(request: Request, cached: CachedResponse) -> Response
     headers = cached['headers'].copy()
 
     if etag := request.headers.get('if-none-match', None):
-        if etag.startswith('W/'):
-            etag = etag[2:]
+        etag = etag.removeprefix('W/')
         if headers['etag'] == etag:
             headers['content-length'] = '0'
             return Response(
