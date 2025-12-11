@@ -1,5 +1,6 @@
 __pycache__
 /dist
+/fastapi_caching_route/_version.py
 /site
 
 .coverage*

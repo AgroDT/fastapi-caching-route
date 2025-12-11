@@ -40,12 +40,12 @@ def simple_client_factory(
     return TestClient(app_)
 
 
-@pytest.fixture(name='anonymous_client')
+@pytest.fixture(name='anonymous_client', scope='session')
 def anonymous_client_fixture() -> TestClient:
     return TestClient(app)
 
 
-@pytest.fixture(name='client')
+@pytest.fixture(name='client', scope='session')
 def client_fixture() -> TestClient:
     return TestClient(app, headers={'X-Key': 'secret'})
 
@@ -78,7 +78,7 @@ def test_namespace(ns_kwargs: dict) -> None:
 
 def test_non_authorized(anonymous_client: TestClient) -> None:
     res = anonymous_client.get('/cached')
-    assert res.status_code == 403
+    assert res.status_code == 401
 
 
 @pytest.mark.parametrize('url', ['/cached', '/stream-cached'])
