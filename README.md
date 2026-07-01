@@ -1,5 +1,11 @@
 # FastAPI Caching Route
 
+[![PR Checks](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/pr.yaml/badge.svg)](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/pr.yaml)
+[![Coverage](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/coverage.yaml/badge.svg)](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/coverage.yaml)
+[![Coverage Status](https://coveralls.io/repos/github/AgroDT/fastapi-caching-route/badge.svg)](https://coveralls.io/github/AgroDT/fastapi-caching-route)
+[![Docs](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/deploy-docs.yaml/badge.svg)](https://github.com/AgroDT/fastapi-caching-route/actions/workflows/deploy-docs.yaml)
+[![PyPI](https://img.shields.io/pypi/v/fastapi-caching-route.svg)](https://pypi.org/project/fastapi-caching-route/)
+
 FastAPI route class for response caching before entering the endpoint handler.
 
 `fastapi-caching-route` plugs into `fastapi.APIRouter`, stores complete response
