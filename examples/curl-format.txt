@@ -1,0 +1,7 @@
+\n\n
+HTTP Code:  %{http_code}\n
+Body Size:  %{size_download}\n
+Time total: %{time_total}\n
+ETag:       %header{etag}\n
+X-Cache:    %header{x-cache}\n
+\n
