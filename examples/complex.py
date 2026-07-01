@@ -6,7 +6,6 @@ from fastapi.security import APIKeyHeader
 from fastapi_caching_route import CachingRoute, FastAPICache
 
 
-app = FastAPI()
 router = APIRouter(route_class=CachingRoute)
 cache = FastAPICache(SimpleMemoryCache())
 # Any non-empty string is considered a valid key
@@ -74,5 +73,5 @@ def get_with_params(a: str, b: str = 'b') -> dict:
     return {'a': a, 'b': b}
 
 
+app = FastAPI()
 app.include_router(router)
-cache.configure_app(app)

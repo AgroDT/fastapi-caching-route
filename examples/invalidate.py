@@ -16,7 +16,6 @@ class User(UserInput):
     id: int
 
 
-app = FastAPI()
 router = APIRouter(prefix='/users', route_class=CachingRoute)
 cache = FastAPICache(SimpleMemoryCache())
 # User DB
@@ -65,5 +64,5 @@ async def patch_user(user_id: int, user_input: UserInput) -> User:
         return user
 
 
+app = FastAPI()
 app.include_router(router)
-cache.configure_app(app)

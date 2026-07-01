@@ -2,25 +2,22 @@ from collections.abc import Callable
 
 import pytest
 from aiocache import SimpleMemoryCache
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi_caching_route.main import (
-    CacheInitializationError,
     CachingRoute,
     FastAPICache,
-    RouteClassError,
 )
 from starlette.testclient import TestClient
 
 from examples import invalidate
-from examples.complex import app, cache
+from examples.complex import app
 
 
 def simple_client_factory(
     *,
     ns_root: str | None = None,
     ns_method: str | None = None,
-    configure: bool = True,
     route_class: type[APIRoute] = CachingRoute,
 ) -> TestClient:
     router = APIRouter(route_class=route_class)
@@ -34,8 +31,6 @@ def simple_client_factory(
 
     app_ = FastAPI()
     app_.include_router(router)
-    if configure:
-        cache.configure_app(app_)
 
     return TestClient(app_)
 
@@ -50,20 +45,16 @@ def client_fixture() -> TestClient:
     return TestClient(app, headers={'X-Key': 'secret'})
 
 
-def test_unconfigured() -> None:
-    client = simple_client_factory(configure=False)
-    with pytest.raises(CacheInitializationError):
-        client.get('/')
+def test_configure_app_not_required() -> None:
+    client = simple_client_factory()
+    res = client.get('/')
+    assert res.headers['x-cache'] == 'MISS'
 
 
-def test_configure_twice() -> None:
-    with pytest.raises(CacheInitializationError):
-        cache.configure_app(app)
-
-
-def test_bad_route_class() -> None:
-    with pytest.raises(RouteClassError):
-        simple_client_factory(route_class=APIRoute)
+def test_plain_apiroute_ignores_cache_config() -> None:
+    client = simple_client_factory(route_class=APIRoute)
+    res = client.get('/')
+    assert 'x-cache' not in res.headers
 
 
 @pytest.mark.parametrize(
@@ -90,6 +81,31 @@ def test_cached(client: TestClient, url: str) -> None:
     res = client.get(url)
     assert res.status_code == 200
     assert res.headers['x-cache'] == 'HIT'
+
+
+def test_cache_hit_skips_endpoint_after_early_dependencies() -> None:
+    router = APIRouter(route_class=CachingRoute)
+    cache = FastAPICache(SimpleMemoryCache())
+    calls = {'early_dependency': 0, 'endpoint': 0}
+
+    def early_dependency() -> None:
+        calls['early_dependency'] += 1
+
+    @cache(dependencies=[Depends(early_dependency)])
+    @router.get('/')
+    def cached() -> str:
+        calls['endpoint'] += 1
+        return 'Hello, World!'
+
+    app_ = FastAPI()
+    app_.include_router(router)
+    client = TestClient(app_)
+
+    assert client.get('/').headers['x-cache'] == 'MISS'
+    assert calls == {'early_dependency': 1, 'endpoint': 1}
+
+    assert client.get('/').headers['x-cache'] == 'HIT'
+    assert calls == {'early_dependency': 2, 'endpoint': 1}
 
 
 def _test_valid_etag(client: TestClient, etag: str) -> None:

@@ -3,7 +3,6 @@ from fastapi import APIRouter, FastAPI
 from fastapi_caching_route import CachingRoute, FastAPICache
 
 
-app = FastAPI()
 router = APIRouter(route_class=CachingRoute)
 cache = FastAPICache(SimpleMemoryCache())
 
@@ -15,5 +14,5 @@ def cached() -> str:
     return 'Hello, World!'
 
 
+app = FastAPI()
 app.include_router(router)
-cache.configure_app(app)

@@ -4,36 +4,42 @@ from __future__ import annotations
 
 import base64
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     Literal,
-    NotRequired,
     ParamSpec,
     TypedDict,
     TypeVar,
-    Unpack,
     cast,
 )
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Request, Response
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, solve_dependencies
-from fastapi.routing import APIRoute, get_request_handler
+from fastapi.routing import APIRoute
 from starlette.responses import StreamingResponse
 from starlette.status import HTTP_200_OK, HTTP_304_NOT_MODIFIED
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Generator, Sequence
+    from collections.abc import (
+        AsyncGenerator,
+        Awaitable,
+        Callable,
+        Coroutine,
+        Iterable,
+        Sequence,
+        Set as AbstractSet,
+    )
 
     from aiocache import BaseCache
     from fastapi.params import Depends
-    from fastapi.types import DependencyCacheKey
     from starlette.datastructures import MutableHeaders
-    from typing_extensions import Doc
+    from typing_extensions import Buffer, Doc, NotRequired
 
     KeyBuilder = Callable[[Request], str]
     RouteHandler = Callable[[Request], Coroutine[Any, Any, Response]]
@@ -57,15 +63,21 @@ if TYPE_CHECKING:
         headers: dict[str, str]
         media_type: str | None
 
-    _CacheEndpoints = dict[Callable, CacheParams]
-    _CacheMethodParams = tuple[KeyBuilder, CacheParamsBase, Dependant | None]
-    _DependencyCache = dict[DependencyCacheKey, Any]
     _T = TypeVar('_T')
     _P = ParamSpec('_P')
 
 
-_CACHE_INSTANCE = '__cache_instance'
-_DEFAULT_ACCEPTED_STATUS_CODES = {HTTP_200_OK}
+_CACHE_CONFIG = '__fastapi_caching_route_87233d36__'
+
+DEFAULT_ACCEPTED_STATUS_CODES = frozenset({HTTP_200_OK})
+
+
+@dataclass(frozen=True, slots=True)
+class _CacheConfig:
+    cache: FastAPICache
+    key_builder: KeyBuilder | None
+    early_dependencies: Sequence[Depends]
+    params: CacheParamsBase
 
 
 class FastAPICache:
@@ -79,7 +91,6 @@ class FastAPICache:
     from fastapi_caching_route import CachingRoute, FastAPICache
 
 
-    app = FastAPI()
     router = APIRouter(route_class=CachingRoute)
     cache = FastAPICache(SimpleMemoryCache())
 
@@ -88,10 +99,19 @@ class FastAPICache:
     def cached() -> str:
         return 'Hello, World!'
 
+    app = FastAPI()
     app.include_router(router)
-    cache.configure_app(app)
     ```
     """
+
+    __slots__ = (
+        '_cache_header',
+        '_cache_header_hit',
+        '_cache_header_miss',
+        '_concat_namespace',
+        '_inner',
+        'accepted_status_codes',
+    )
 
     def __init__(
         self,
@@ -136,35 +156,28 @@ class FastAPICache:
         cache_header_hit: str = 'HIT',
         cache_header_miss: str = 'MISS',
         accepted_status_codes: Annotated[
-            set[int],
-            Doc(
-                """Only cache responses with these HTTP status codes.
-
-                By default only 200 is cached.
-                """,
-            ),
-        ] = _DEFAULT_ACCEPTED_STATUS_CODES,
-        cache_dependencies: Annotated[
-            bool,
-            Doc('Set to `False` to  disable dependency caching.'),
-        ] = True,
+            AbstractSet[int] | Iterable[int],
+            Doc('Only cache responses with these HTTP status codes.'),
+        ] = DEFAULT_ACCEPTED_STATUS_CODES,
     ) -> None:
         self._inner = cache
-        self._endpoints: _CacheEndpoints = {}
         self._concat_namespace = namespace_policy == 'concat'
         self._cache_header = cache_header
         self._cache_header_hit = cache_header_hit
         self._cache_header_miss = cache_header_miss
-        self.accepted_status_codes = accepted_status_codes
-        self.cache_dependencies = cache_dependencies
+        self.accepted_status_codes = frozenset(accepted_status_codes)
 
     def __call__(
         self,
-        **kwargs: 'Unpack[CacheParams]',  # noqa: UP037
+        *,
+        key_builder: KeyBuilder | None = None,
+        dependencies: Sequence[Depends] = (),
+        namespace: str | None = None,
+        ttl: float | None = None,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         """Decorate caching route.
 
-        Does not actually wrap the endpoint, but marks it for caching.
+        Marks the endpoint for caching by :class:`CachingRoute`.
 
         ```py hl_lines="3"
             cache = FastAPICache(SimpleMemoryCache())
@@ -175,22 +188,23 @@ class FastAPICache:
                 ...
         ```
         """
+        params: CacheParamsBase = {}
+        if namespace is not None:
+            params['namespace'] = namespace
+        if ttl is not None:
+            params['ttl'] = ttl
 
         def decorator(endpoint: Callable[_P, _T]) -> Callable[_P, _T]:
-            self._endpoints[endpoint] = kwargs
+            config = _CacheConfig(
+                cache=self,
+                key_builder=key_builder,
+                early_dependencies=tuple(dependencies),
+                params=params,
+            )
+            setattr(endpoint, _CACHE_CONFIG, config)
             return endpoint
 
         return decorator
-
-    def configure_app(self, app: FastAPI) -> None:
-        """Apply caching for decorated routes.
-
-        Should be called once after all routes were mounted.
-        """
-        if _CACHE_INSTANCE in app.extra:
-            raise CacheInitializationError
-        self.routes = dict(_cache_routes(app, self._endpoints))
-        app.extra[_CACHE_INSTANCE] = self
 
     def get_cached(
         self,
@@ -229,14 +243,14 @@ class FastAPICache:
         """
         return self._inner.delete(cache_key, namespace)
 
-    def check_namespace(self, caching_params: CacheParamsBase) -> str | None:
-        """Construct a full namespace according to the selected policy."""
+    def prepare_cache_params(self, cache_params: CacheParamsBase) -> CacheParamsBase:
+        """Prepare cache backend parameters for a request."""
+        caching_params = cache_params.copy()
         namespace = caching_params.get('namespace', None)
         root = self._inner.namespace
         if self._concat_namespace and root and namespace:
-            namespace = f'{root}:{namespace}'
-            caching_params['namespace'] = namespace
-        return namespace
+            caching_params['namespace'] = f'{root}:{namespace}'
+        return cast('CacheParamsBase', caching_params)
 
     def set_cache_header(self, headers: MutableHeaders | dict[str, str], *, hit: bool) -> None:
         """Set a cache status header."""
@@ -256,60 +270,41 @@ class CachingRoute(APIRoute):
     ```
     """
 
-    def _get_original_route_handler(
-        self,
-        dependency_cache: _DependencyCache | None = None,
-    ) -> RouteHandler:
-        if dependency_cache:
-            dependency_overrides_provider: Any = _CachedDependencyProvider(dependency_cache)
-        else:
-            dependency_overrides_provider = self.dependency_overrides_provider
-
-        return get_request_handler(
-            dependant=self.dependant,
-            body_field=self.body_field,
-            status_code=self.status_code,
-            response_class=self.response_class,
-            response_field=self.secure_cloned_response_field,
-            response_model_include=self.response_model_include,
-            response_model_exclude=self.response_model_exclude,
-            response_model_by_alias=self.response_model_by_alias,
-            response_model_exclude_unset=self.response_model_exclude_unset,
-            response_model_exclude_defaults=self.response_model_exclude_defaults,
-            dependency_overrides_provider=dependency_overrides_provider,
-        )
-
     def get_route_handler(self) -> RouteHandler:  # noqa: D102
+        original_handler = super().get_route_handler()
+        early_dependant: Dependant | None = None
+        early_dependant_initialized = False
+        default_key_builder: KeyBuilder | None = None
+
         async def app(request: Request) -> Response:
-            try:
-                cache: FastAPICache = request.app.extra[_CACHE_INSTANCE]
-            except KeyError as exc:
-                raise CacheInitializationError from exc
+            nonlocal default_key_builder, early_dependant, early_dependant_initialized
 
-            if params := cache.routes.get((request.scope['route'].path, request.method), None):
-                key_builder, caching_params, dependant = params
-            else:
-                return await self._get_original_route_handler()(request)
+            config = _get_cache_config(self.endpoint)
+            if config is None:
+                return await original_handler(request)
 
-            dependency_cache = None
-            if dependant:
-                async with AsyncExitStack() as async_exit_stack:
-                    solved_dependency = await solve_dependencies(
-                        request=request,
-                        dependant=dependant,
-                        async_exit_stack=async_exit_stack,
-                        embed_body_fields=False,
-                    )
-                if cache.cache_dependencies:
-                    dependency_cache = solved_dependency.dependency_cache
+            if not early_dependant_initialized:
+                early_dependant = _build_early_dependant(self.path, config)
+                early_dependant_initialized = True
 
-            namespace = cache.check_namespace(caching_params)
+            if not await _early_dependencies_solved(request, early_dependant):
+                return await original_handler(request)
+
+            cache = config.cache
+            caching_params = cache.prepare_cache_params(config.params)
+            namespace = caching_params.get('namespace', None)
+            key_builder = config.key_builder
+            if key_builder is None:
+                if default_key_builder is None:
+                    default_key_builder = _key_builder_factory(self.dependant.query_params)
+                key_builder = default_key_builder
+
             cache_key = key_builder(request)
             if cached := await cache.get_cached(cache_key, namespace):
                 cache.set_cache_header(cached['headers'], hit=True)
                 return _build_cached_response(request, cached)
 
-            response = await self._get_original_route_handler(dependency_cache)(request)
+            response = await original_handler(request)
             if response.status_code not in cache.accepted_status_codes:
                 return response
 
@@ -330,90 +325,33 @@ class CachingRoute(APIRoute):
         return app
 
 
-class CacheInitializationError(RuntimeError):
-    """`FastAPICache.configure_app` was not called or was called more then once."""
+def _get_cache_config(endpoint: Any) -> _CacheConfig | None:
+    config = getattr(endpoint, _CACHE_CONFIG, None)
+    if isinstance(config, _CacheConfig):
+        return config
+    return None
 
-    def __init__(self) -> None:
-        super().__init__(
-            f'{__package__}.{FastAPICache.configure_app.__qualname__}'
-            ' must be called once after the app initialization',
+
+def _build_early_dependant(path: str, config: _CacheConfig) -> Dependant | None:
+    dependencies = [
+        get_dependant(
+            path=path,
+            call=dependency.dependency,
+            use_cache=dependency.use_cache,
         )
+        for dependency in config.early_dependencies
+        if dependency.dependency
+    ]
+    if not dependencies:
+        return None
+    return Dependant(dependencies=dependencies)
 
 
-class RouteClassError(TypeError):
-    """`FastAPICache` decorator was applied to a route other then `CachingRoute`."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            f'{__package__}.{CachingRoute.__qualname__}'
-            ' must be used for routes with'
-            f' {__package__}.{FastAPICache.__qualname__}'
-            ' decorator',
-        )
-
-
-class _CachedDependency:
-    def __init__(self, result: Any) -> None:
-        self._result = result
-
-    def __call__(self) -> Any:
-        return self._result
-
-
-class _CachedDependencyProvider:
-    def __init__(self, cache: _DependencyCache) -> None:
-        self.dependency_overrides = {
-            key[0]: _CachedDependency(res)
-            for key, res in cache.items()
-        }  # fmt: skip
-
-
-def _cache_routes(
-    app: FastAPI,
-    endpoints: _CacheEndpoints,
-) -> Generator[tuple[tuple[str, str], _CacheMethodParams], Any, None]:
-    paths = app.openapi()['paths']
-    for route in app.routes:
-        if (
-            isinstance(route, APIRoute)
-            and (cache_params := endpoints.get(route.endpoint, None)) is not None
-        ):
-            if not isinstance(route, CachingRoute):
-                raise RouteClassError
-
-            route_path = route.path
-            oapi_path = paths[route_path]
-            key_builder = cache_params.pop('key_builder', None)
-            if deps := cache_params.pop('dependencies', []):
-                dependencies = [
-                    get_dependant(
-                        path=route.path,
-                        call=d.dependency,
-                        use_cache=d.use_cache,
-                    )
-                    for d in deps
-                    if d.dependency
-                ]
-                dependant = Dependant(dependencies=dependencies)
-            else:
-                dependant = None
-
-            for method in route.methods:
-                if key_builder is None:
-                    oapi_params = oapi_path[method.lower()].get('parameters', {})
-                    key_builder = _key_builder_factory(oapi_params)
-                yield (
-                    (route_path, method),
-                    (key_builder, cast('CacheParamsBase', cache_params), dependant),
-                )
-
-
-def _key_builder_factory(params: list[dict]) -> KeyBuilder:
+def _key_builder_factory(params: Sequence[Any]) -> KeyBuilder:
     params_ = []
-    for param in sorted(params, key=lambda p: p['name']):
-        if param['in'] == 'query':
-            default = param['schema'].get('default', '')
-            params_.append((param['name'], default))
+    for param in sorted(params, key=lambda p: p.alias or p.name):
+        default = '' if param.field_info.is_required() else param.default
+        params_.append((param.alias or param.name, default))
 
     def _impl(request: Request) -> str:
         key = request.scope['path'] + '?'
@@ -455,8 +393,9 @@ async def _cache_streaming_response(
     content = b''
     async for chunk in response.body_iterator:
         if isinstance(chunk, str):
-            chunk = chunk.encode(response.charset)  # noqa: PLW2901
-        content += chunk
+            content += chunk.encode(response.charset)
+        else:
+            content += chunk
 
     _set_etag(headers, content)
 
@@ -476,8 +415,21 @@ async def _cache_streaming_response(
     return cached, response
 
 
-def _cached_response(**kwargs: Unpack[CachedResponse]) -> CachedResponse:
-    return kwargs
+async def _early_dependencies_solved(request: Request, dependant: Dependant | None) -> bool:
+    if dependant is None:
+        return True
+    async with AsyncExitStack() as async_exit_stack:
+        solved_dependency = await solve_dependencies(
+            request=request,
+            dependant=dependant,
+            async_exit_stack=async_exit_stack,
+            embed_body_fields=False,
+        )
+    return not solved_dependency.errors
+
+
+def _cached_response(**kwargs: Any) -> CachedResponse:
+    return cast('CachedResponse', kwargs)
 
 
 async def _content_stream(content: bytes) -> AsyncGenerator[bytes, None]:
@@ -488,6 +440,6 @@ async def _content_stream(content: bytes) -> AsyncGenerator[bytes, None]:
     yield content[b:]
 
 
-def _set_etag(headers: MutableHeaders | dict[str, str], content: bytes) -> None:
+def _set_etag(headers: MutableHeaders | dict[str, str], content: Buffer) -> None:
     etag = sha256(content, usedforsecurity=False).hexdigest()
     headers['etag'] = f'"{etag}"'
