@@ -11,25 +11,21 @@ from examples import invalidate
 from examples.complex import app as complex_app
 
 
-def simple_client_factory(
-    *,
-    ns_root: str | None = None,
-    ns_method: str | None = None,
-    route_class: type[APIRoute] = CachingRoute,
-) -> TestClient:
-    router = APIRouter(route_class=route_class)
-    cache = FastAPICache(SimpleMemoryCache(namespace=ns_root))
+class AppFactory:
+    def __init__(
+        self,
+        *,
+        route_class: type[APIRoute] = CachingRoute,
+        cache: FastAPICache | None = None,
+    ) -> None:
+        self.router = APIRouter(route_class=route_class)
+        self.cache = cache or FastAPICache(SimpleMemoryCache())
 
-    @cache(namespace=ns_method)
-    @router.get('/')
-    def cached() -> str:
-        """Return cached response."""
-        return 'Hello, World!'
+    def create_client(self) -> TestClient:
+        app = FastAPI()
+        app.include_router(self.router)
 
-    app = FastAPI()
-    app.include_router(router)
-
-    return TestClient(app)
+        return TestClient(app)
 
 
 @pytest.fixture(name='anonymous_client', scope='session')
@@ -43,25 +39,46 @@ def client_fixture() -> TestClient:
 
 
 def test_configure_app_not_required() -> None:
-    client = simple_client_factory()
-    res = client.get('/')
+    af = AppFactory()
+
+    @af.cache()
+    @af.router.get('/')
+    def cached() -> str:
+        return 'Hello, World!'
+
+    res = af.create_client().get('/')
     assert res.headers['x-cache'] == 'MISS'
 
 
 def test_plain_apiroute_ignores_cache_config() -> None:
-    client = simple_client_factory(route_class=APIRoute)
-    res = client.get('/')
+    af = AppFactory(route_class=APIRoute)
+
+    @af.cache()
+    @af.router.get('/')
+    def cached() -> str:
+        return 'Hello, World!'
+
+    res = af.create_client().get('/')
     assert 'x-cache' not in res.headers
 
 
 @pytest.mark.parametrize(
-    'ns_kwargs',
-    [{'ns_root': 'root'}, {'ns_method': 'method'}, {'ns_root': 'root', 'ns_method': 'method'}],
-    ids=['root', 'method', 'root and method'],
+    ('ns_root', 'ns_method'),
+    [
+        pytest.param('root', None, id='root'),
+        pytest.param(None, 'method', id='method'),
+        pytest.param('root', 'method', id='root and method'),
+    ],
 )
-def test_namespace(ns_kwargs: dict) -> None:  # ty:ignore[missing-type-argument]
-    client = simple_client_factory(**ns_kwargs)
-    client.get('/')
+def test_namespace(ns_root: str | None, ns_method: str | None) -> None:
+    af = AppFactory(cache=FastAPICache(SimpleMemoryCache(namespace=ns_root)))
+
+    @af.cache(namespace=ns_method)
+    @af.router.get('/')
+    def cached() -> str:
+        return 'Hello, World!'
+
+    af.create_client().get('/')
 
 
 def test_non_authorized(anonymous_client: TestClient) -> None:
@@ -81,22 +98,19 @@ def test_cached(client: TestClient, url: str) -> None:
 
 
 def test_cache_hit_skips_endpoint_after_early_dependencies() -> None:
-    router = APIRouter(route_class=CachingRoute)
-    cache = FastAPICache(SimpleMemoryCache())
+    af = AppFactory()
     calls = {'early_dependency': 0, 'endpoint': 0}
 
     def early_dependency() -> None:
         calls['early_dependency'] += 1
 
-    @cache(dependencies=[Depends(early_dependency)])
-    @router.get('/')
+    @af.cache(dependencies=[Depends(early_dependency)])
+    @af.router.get('/')
     def cached() -> str:
         calls['endpoint'] += 1
         return 'Hello, World!'
 
-    app_ = FastAPI()
-    app_.include_router(router)
-    client = TestClient(app_)
+    client = af.create_client()
 
     assert client.get('/').headers['x-cache'] == 'MISS'
     assert calls == {'early_dependency': 1, 'endpoint': 1}
@@ -159,17 +173,14 @@ def test_etag(client: TestClient, tester: Callable[[TestClient, str], None]) -> 
 
 
 def test_endpoint_etag_is_preserved() -> None:
-    router = APIRouter(route_class=CachingRoute)
-    cache = FastAPICache(SimpleMemoryCache())
+    af = AppFactory()
 
-    @cache()
-    @router.get('/')
+    @af.cache()
+    @af.router.get('/')
     def cached() -> Response:
         return Response(content='Hello, World!', headers={'ETag': 'W/"custom"'})
 
-    app_ = FastAPI()
-    app_.include_router(router)
-    client = TestClient(app_)
+    client = af.create_client()
 
     res = client.get('/')
     assert res.status_code == 200
@@ -187,20 +198,36 @@ def test_endpoint_etag_is_preserved() -> None:
     assert not res.content
 
 
+def test_cached_response_status_code_is_preserved() -> None:
+    af = AppFactory(cache=FastAPICache(SimpleMemoryCache(), accepted_status_codes={201}))
+
+    @af.cache()
+    @af.router.post('/')
+    def cached() -> Response:
+        return Response(content='Created', status_code=201)
+
+    client = af.create_client()
+
+    res = client.post('/')
+    assert res.status_code == 201
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.post('/')
+    assert res.status_code == 201
+    assert res.headers['x-cache'] == 'HIT'
+
+
 def test_vary_headers_are_part_of_default_cache_key() -> None:
-    router = APIRouter(route_class=CachingRoute)
-    cache = FastAPICache(SimpleMemoryCache())
+    af = AppFactory()
     calls = {'count': 0}
 
-    @cache(vary_headers=['Accept-Language'])
-    @router.get('/')
+    @af.cache(vary_headers=['Accept-Language'])
+    @af.router.get('/')
     def cached(request: Request) -> str:
         calls['count'] += 1
         return request.headers.get('accept-language', 'missing')
 
-    app_ = FastAPI()
-    app_.include_router(router)
-    client = TestClient(app_)
+    client = af.create_client()
 
     res = client.get('/', headers={'Accept-Language': 'en'})
     assert res.text == '"en"'
@@ -220,19 +247,16 @@ def test_vary_headers_are_part_of_default_cache_key() -> None:
 
 
 def test_vary_wildcard_response_is_not_cached() -> None:
-    router = APIRouter(route_class=CachingRoute)
-    cache = FastAPICache(SimpleMemoryCache())
+    af = AppFactory()
     calls = {'count': 0}
 
-    @cache()
-    @router.get('/')
+    @af.cache()
+    @af.router.get('/')
     def cached() -> Response:
         calls['count'] += 1
         return Response(content=str(calls['count']), headers={'Vary': '*'})
 
-    app_ = FastAPI()
-    app_.include_router(router)
-    client = TestClient(app_)
+    client = af.create_client()
 
     res = client.get('/')
     assert res.text == '1'
@@ -245,22 +269,19 @@ def test_vary_wildcard_response_is_not_cached() -> None:
 
 
 def test_default_cache_key_includes_http_method() -> None:
-    router = APIRouter(route_class=CachingRoute)
-    cache = FastAPICache(SimpleMemoryCache())
+    af = AppFactory()
 
-    @cache()
-    @router.get('/same')
+    @af.cache()
+    @af.router.get('/same')
     def get_same() -> str:
         return 'GET'
 
-    @cache()
-    @router.post('/same')
+    @af.cache()
+    @af.router.post('/same')
     def post_same() -> str:
         return 'POST'
 
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
+    client = af.create_client()
 
     res = client.get('/same')
     assert res.text == '"GET"'

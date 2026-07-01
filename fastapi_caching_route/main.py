@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         content: Buffer
         headers: dict[str, str]
         media_type: str | None
+        status_code: int
 
     _T = TypeVar('_T')
     _P = ParamSpec('_P')
@@ -368,6 +369,7 @@ class _CachingRouteHandler:
                 'content': response.body,
                 'headers': dict(response.headers),
                 'media_type': response.media_type,
+                'status_code': response.status_code,
             }
 
         await cache.set_cached(cache_request.cache_key, cached, cache_request.caching_params)
@@ -425,6 +427,7 @@ def _build_cached_response(request: Request, cached: CachedResponse) -> Response
 
     return Response(
         content=cached['content'],
+        status_code=cached['status_code'],
         headers=headers,
         media_type=cached['media_type'],
     )
@@ -450,6 +453,7 @@ async def _cache_streaming_response(
         'content': content,
         'headers': dict(headers),
         'media_type': media_type,
+        'status_code': status_code,
     }
 
     response = StreamingResponse(
