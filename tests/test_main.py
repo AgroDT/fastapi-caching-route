@@ -8,7 +8,7 @@ from fastapi_caching_route.main import CachingRoute, FastAPICache
 from starlette.testclient import TestClient
 
 from examples import invalidate
-from examples.complex import app
+from examples.complex import app as complex_app
 
 
 def simple_client_factory(
@@ -26,20 +26,20 @@ def simple_client_factory(
         """Return cached response."""
         return 'Hello, World!'
 
-    app_ = FastAPI()
-    app_.include_router(router)
+    app = FastAPI()
+    app.include_router(router)
 
-    return TestClient(app_)
+    return TestClient(app)
 
 
 @pytest.fixture(name='anonymous_client', scope='session')
 def anonymous_client_fixture() -> TestClient:
-    return TestClient(app)
+    return TestClient(complex_app)
 
 
 @pytest.fixture(name='client', scope='session')
 def client_fixture() -> TestClient:
-    return TestClient(app, headers={'X-Key': 'secret'})
+    return TestClient(complex_app, headers={'X-Key': 'secret'})
 
 
 def test_configure_app_not_required() -> None:

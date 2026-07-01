@@ -22,7 +22,7 @@ dependencies = [
 dev = [
     "fastapi~=0.138",
     "griffe-typingdoc~=0.3",
-    "httpx~=0.28",
+    "httpx2~=2.5",
     "markdown-include~=0.8",
     "mkdocs-material~=9.7",
     "mkdocstrings[python]~=1.0",
@@ -30,7 +30,7 @@ dev = [
     "pytest-cov~=7.1",
     "pytest~=9.1",
     "ruff~=0.15",
-    "ty>=0.0.55",
+    "ty>=0.0.56",
     "uvicorn[standard]~=0.49",
 ]
 
