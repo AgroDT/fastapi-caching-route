@@ -12,6 +12,7 @@ from fastapi import Request, Response
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, solve_dependencies
 from fastapi.routing import APIRoute
+from starlette.datastructures import MutableHeaders
 from starlette.responses import StreamingResponse
 from starlette.status import HTTP_200_OK, HTTP_304_NOT_MODIFIED
 
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 
     from aiocache import BaseCache
     from fastapi.params import Depends
-    from starlette.datastructures import MutableHeaders
     from typing_extensions import Buffer, Doc, NotRequired
 
     KeyBuilder = Callable[[Request], str]
@@ -52,8 +52,8 @@ if TYPE_CHECKING:
         """Response data to be stored in cache."""
 
         content: Buffer
-        headers: dict[str, str]
         media_type: str | None
+        raw_headers: list[tuple[bytes, bytes]]
         status_code: int
 
     _T = TypeVar('_T')
@@ -349,8 +349,9 @@ class _CachingRouteHandler:
         if cached is None:
             return None
 
-        cache_request.cache.set_cache_header(cached['headers'], hit=True)
-        return _build_cached_response(cache_request.request, cached)
+        headers = MutableHeaders(raw=cached['raw_headers'])
+        cache_request.cache.set_cache_header(headers, hit=True)
+        return _build_cached_response(cache_request.request, cached, headers)
 
     async def _cache_response(self, response: Response, cache_request: _CacheRequest) -> Response:
         cache = cache_request.cache
@@ -367,8 +368,8 @@ class _CachingRouteHandler:
             _ensure_etag(response.headers, response.body)
             cached: CachedResponse = {
                 'content': response.body,
-                'headers': dict(response.headers),
                 'media_type': response.media_type,
+                'raw_headers': list(response.raw_headers),
                 'status_code': response.status_code,
             }
 
@@ -416,25 +417,38 @@ def _key_builder_factory(params: Sequence[Any], vary_headers: Sequence[str]) -> 
     return _impl
 
 
-def _build_cached_response(request: Request, cached: CachedResponse) -> Response:
-    headers = cached['headers'].copy()
-
+def _build_cached_response(
+    request: Request,
+    cached: CachedResponse,
+    headers: MutableHeaders,
+) -> Response:
     if_none_match = request.headers.get('if-none-match', None)
     if if_none_match and _if_none_match_matches(if_none_match, headers.get('etag', '')):
         headers['content-length'] = '0'
-        return Response(
+        return _build_response(
             content=b'',
             status_code=HTTP_304_NOT_MODIFIED,
             headers=headers,
             media_type=cached['media_type'],
         )
 
-    return Response(
+    return _build_response(
         content=cached['content'],
         status_code=cached['status_code'],
         headers=headers,
         media_type=cached['media_type'],
     )
+
+
+def _build_response(
+    content: Buffer,
+    status_code: int,
+    headers: MutableHeaders,
+    media_type: str | None,
+) -> Response:
+    response = Response(content=content, status_code=status_code, media_type=media_type)
+    response.raw_headers = headers.raw
+    return response
 
 
 async def _cache_streaming_response(
@@ -456,8 +470,8 @@ async def _cache_streaming_response(
 
     cached: CachedResponse = {
         'content': content,
-        'headers': dict(headers),
         'media_type': media_type,
+        'raw_headers': list(response.raw_headers),
         'status_code': status_code,
     }
 

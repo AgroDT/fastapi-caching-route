@@ -218,6 +218,31 @@ def test_cached_response_status_code_is_preserved() -> None:
     assert res.headers['x-cache'] == 'HIT'
 
 
+def test_cached_response_repeated_headers_are_preserved() -> None:
+    af = AppFactory()
+
+    @af.cache()
+    @af.router.get('/')
+    def cached() -> Response:
+        response = Response(content='Hello, World!')
+        response.set_cookie('first', '1')
+        response.set_cookie('second', '2')
+        return response
+
+    client = af.create_client()
+
+    res = client.get('/')
+    assert res.headers['x-cache'] == 'MISS'
+    assert len(res.headers.get_list('set-cookie')) == 2
+
+    res = client.get('/')
+    assert res.headers['x-cache'] == 'HIT'
+    assert res.headers.get_list('set-cookie') == [
+        'first=1; Path=/; SameSite=lax',
+        'second=2; Path=/; SameSite=lax',
+    ]
+
+
 def test_vary_headers_are_part_of_default_cache_key() -> None:
     af = AppFactory()
     calls = {'count': 0}
