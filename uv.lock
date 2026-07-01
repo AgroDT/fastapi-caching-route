@@ -341,17 +341,19 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fastapi" },
-    { name = "griffe-typingdoc" },
     { name = "httpx2" },
-    { name = "markdown-include" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings", extra = ["python"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "ty" },
     { name = "uvicorn", extra = ["standard"] },
+]
+docs = [
+    { name = "griffe-typingdoc" },
+    { name = "markdown-include" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings", extra = ["python"] },
 ]
 
 [package.metadata]
@@ -360,17 +362,19 @@ requires-dist = [{ name = "aiocache", specifier = ">=0.12,<1.0" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "fastapi", specifier = "~=0.138" },
-    { name = "griffe-typingdoc", specifier = "~=0.3" },
     { name = "httpx2", specifier = "~=2.5" },
-    { name = "markdown-include", specifier = "~=0.8" },
-    { name = "mkdocs", specifier = "~=1.6" },
-    { name = "mkdocs-material", specifier = "~=9.7" },
-    { name = "mkdocstrings", extras = ["python"], specifier = "~=1.0" },
     { name = "pytest", specifier = "~=9.1" },
     { name = "pytest-cov", specifier = "~=7.1" },
     { name = "ruff", specifier = "~=0.15" },
     { name = "ty", specifier = ">=0.0.56" },
     { name = "uvicorn", extras = ["standard"], specifier = "~=0.49" },
+]
+docs = [
+    { name = "griffe-typingdoc", specifier = "~=0.3" },
+    { name = "markdown-include", specifier = "~=0.8" },
+    { name = "mkdocs", specifier = "~=1.6" },
+    { name = "mkdocs-material", specifier = "~=9.7" },
+    { name = "mkdocstrings", extras = ["python"], specifier = "~=1.0" },
 ]
 
 [[package]]
