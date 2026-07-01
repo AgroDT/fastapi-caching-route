@@ -28,8 +28,8 @@ dev = [
     "mkdocs~=1.6",
     "mkdocstrings[python]~=1.0",
     "mypy~=1.7",
-    "pytest-cov~=7.0",
-    "pytest~=9.0",
+    "pytest-cov~=7.1",
+    "pytest~=9.1",
     "ruff~=0.14",
     "uvicorn[standard]~=0.49",
 ]
@@ -50,6 +50,7 @@ version = "{version}"
 
 [tool.pytest]
 testpaths = ["tests"]
+addopts = ["--cov=fastapi_caching_route"]
 
 [tool.ruff]
 target-version = "py310"
