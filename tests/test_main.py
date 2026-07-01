@@ -4,10 +4,7 @@ import pytest
 from aiocache import SimpleMemoryCache
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
-from fastapi_caching_route.main import (
-    CachingRoute,
-    FastAPICache,
-)
+from fastapi_caching_route.main import CachingRoute, FastAPICache
 from starlette.testclient import TestClient
 
 from examples import invalidate
@@ -62,7 +59,7 @@ def test_plain_apiroute_ignores_cache_config() -> None:
     [{'ns_root': 'root'}, {'ns_method': 'method'}, {'ns_root': 'root', 'ns_method': 'method'}],
     ids=['root', 'method', 'root and method'],
 )
-def test_namespace(ns_kwargs: dict) -> None:
+def test_namespace(ns_kwargs: dict) -> None:  # ty:ignore[missing-type-argument]
     client = simple_client_factory(**ns_kwargs)
     client.get('/')
 
@@ -134,7 +131,7 @@ def _test_valid_etag_with_w(client: TestClient, etag: str) -> None:
     [_test_valid_etag, _test_invalid_etag, _test_valid_etag_with_w],
     ids=['valid', 'invalid', 'valid with W/'],
 )
-def test_etag(client: TestClient, tester: Callable) -> None:
+def test_etag(client: TestClient, tester: Callable[[TestClient, str], None]) -> None:
     res = client.get('/cached')
     etag = res.headers['etag']
     assert res.status_code == 200

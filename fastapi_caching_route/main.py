@@ -250,7 +250,7 @@ class FastAPICache:
         root = self._inner.namespace
         if self._concat_namespace and root and namespace:
             caching_params['namespace'] = f'{root}:{namespace}'
-        return cast('CacheParamsBase', caching_params)
+        return caching_params
 
     def set_cache_header(self, headers: MutableHeaders | dict[str, str], *, hit: bool) -> None:
         """Set a cache status header."""

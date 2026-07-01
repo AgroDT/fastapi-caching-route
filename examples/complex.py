@@ -68,7 +68,7 @@ def get_failed() -> Response:
 
 @cache()
 @router.get('/query')
-def get_with_params(a: str, b: str = 'b') -> dict:
+def get_with_params(a: str, b: str = 'b') -> dict[str, str]:
     """Return query params as object."""
     return {'a': a, 'b': b}
 

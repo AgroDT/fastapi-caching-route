@@ -27,11 +27,11 @@ dev = [
     "mkdocs-material~=9.7",
     "mkdocs~=1.6",
     "mkdocstrings[python]~=1.0",
-    "mypy~=1.7",
     "pytest-cov~=7.1",
     "pytest~=9.1",
-    "ruff~=0.14",
+    "ruff~=0.15",
     "uvicorn[standard]~=0.49",
+    "ty>=0.0.55",
 ]
 
 [project.urls]
@@ -79,17 +79,16 @@ multiline-quotes = "double"
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
-[tool.mypy]
-files = [
+[tool.ty.src]
+include = [
     "examples",
     "fastapi_caching_route",
     "tests",
 ]
-explicit_package_bases = true
 
-[[tool.mypy.overrides]]
-module = ["aiocache.*"]
-ignore_missing_imports = true
+[tool.ty.rules]
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
 
 [tool.coverage.run]
 source_pkgs = ["fastapi_caching_route"]
