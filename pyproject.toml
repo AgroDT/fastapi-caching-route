@@ -10,8 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dynamic = ["version"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
     "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -37,9 +40,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mentaljam/fastapi-caching-route"
-Repository = "https://github.com/mentaljam/fastapi-caching-route.git"
-Issues = "https://github.com/mentaljam/fastapi-caching-route/issues"
+Homepage = "https://github.com/AgroDT/fastapi-caching-route"
+Repository = "https://github.com/AgroDT/fastapi-caching-route.git"
+Issues = "https://github.com/AgroDT/fastapi-caching-route/issues"
+Documentation = "https://agrodt.github.io/fastapi-caching-route/"
+Coverage = "https://coveralls.io/github/AgroDT/fastapi-caching-route"
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
