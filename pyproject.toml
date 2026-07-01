@@ -57,9 +57,19 @@ target-version = "py310"
 line-length = 100
 show-fixes = true
 output-format = "full"
+include = [
+    "examples/*.py",
+    "examples/README.md",
+    "fastapi_caching_route/*.py",
+    "fastapi_caching_route/*.pyi",
+    "tests/*.py",
+    "pyproject.toml",
+    "README.md",
+]
 
 [tool.ruff.format]
 quote-style = "single"
+preview = true
 
 [tool.ruff.lint]
 select = ["ALL"]
