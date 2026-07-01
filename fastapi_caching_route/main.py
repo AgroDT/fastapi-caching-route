@@ -444,12 +444,13 @@ async def _cache_streaming_response(
     headers = response.headers
     media_type = response.media_type
 
-    content = b''
+    chunks: list[bytes] = []
     async for chunk in response.body_iterator:
         if isinstance(chunk, str):
-            content += chunk.encode(response.charset)
+            chunks.append(chunk.encode(response.charset))
         else:
-            content += chunk
+            chunks.append(bytes(chunk))
+    content = b''.join(chunks)
 
     _ensure_etag(headers, content)
 
