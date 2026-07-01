@@ -396,14 +396,18 @@ def _key_builder_factory(params: Sequence[Any], vary_headers: Sequence[str]) -> 
     params_ = []
     for param in sorted(params, key=lambda p: p.alias or p.name):
         default = '' if param.field_info.is_required() else param.default
-        params_.append((param.alias or param.name, default))
+        if isinstance(default, list):
+            default_values = tuple(str(value) for value in default)
+        else:
+            default_values = (default,)
+        params_.append((param.alias or param.name, default_values))
     vary_headers = _normalize_header_names(vary_headers)
 
     def _impl(request: Request) -> str:
         key = (
             request.method,
             request.scope['path'],
-            tuple((k, request.query_params.get(k, d)) for k, d in params_),
+            tuple((k, tuple(request.query_params.getlist(k)) or d) for k, d in params_),
             tuple((h, request.headers.get(h, '')) for h in vary_headers),
         )
         digest = sha256(repr(key).encode('utf-8'), usedforsecurity=False).digest()

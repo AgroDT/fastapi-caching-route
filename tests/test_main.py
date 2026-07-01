@@ -1,8 +1,9 @@
 from collections.abc import Callable
+from typing import Annotated
 
 import pytest
 from aiocache import SimpleMemoryCache
-from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response
 from fastapi.routing import APIRoute
 from fastapi_caching_route.main import CachingRoute, FastAPICache
 from starlette.testclient import TestClient
@@ -314,6 +315,31 @@ def test_query(client: TestClient) -> None:
     assert isinstance(data, dict)
     assert data['a'] == 'a'
     assert data['b'] == 'b'
+
+
+def test_default_cache_key_includes_repeated_query_values() -> None:
+    af = AppFactory()
+    calls = {'count': 0}
+
+    @af.cache()
+    @af.router.get('/items')
+    def get_items(tag: Annotated[list[str], Query()]) -> dict[str, object]:
+        calls['count'] += 1
+        return {'tag': tag, 'calls': calls['count']}
+
+    client = af.create_client()
+
+    res = client.get('/items', params=[('tag', 'a'), ('tag', 'b')])
+    assert res.headers['x-cache'] == 'MISS'
+    assert res.json() == {'tag': ['a', 'b'], 'calls': 1}
+
+    res = client.get('/items', params=[('tag', 'c'), ('tag', 'b')])
+    assert res.headers['x-cache'] == 'MISS'
+    assert res.json() == {'tag': ['c', 'b'], 'calls': 2}
+
+    res = client.get('/items', params=[('tag', 'a'), ('tag', 'b')])
+    assert res.headers['x-cache'] == 'HIT'
+    assert res.json() == {'tag': ['a', 'b'], 'calls': 1}
 
 
 def test_invalidation() -> None:
