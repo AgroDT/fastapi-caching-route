@@ -17,6 +17,7 @@ derived from the request path, query parameters, or a custom key builder.
 - Return `304 Not Modified` for matching `If-None-Match` requests.
 - Build default cache keys from the route path and declared query parameters.
 - Provide custom key builders for path parameters or application-specific keys.
+- Include selected request headers in default cache keys for negotiated responses.
 - Run explicitly configured dependencies before cache lookup, for example API key
   checks.
 - Pass `namespace` and `ttl` through to the underlying `aiocache` backend.
@@ -133,6 +134,19 @@ def get_user(user_id: int): ...
 Pass `namespace_policy="replace"` to `FastAPICache` if endpoint namespaces should
 replace the root namespace instead.
 
+If the response representation depends on request headers, include those headers
+in the default cache key with `vary_headers`. The route also returns a matching
+`Vary` header:
+
+```py
+@cache(vary_headers=['Accept-Language'])
+@router.get('/localized')
+def localized(request: Request) -> str:
+    return request.headers.get('accept-language', 'en')
+```
+
+Responses with `Vary: *` are not cached.
+
 ## Dependencies Before Cache Lookup
 
 FastAPI dependencies on the route still run on cache misses. If a dependency
@@ -158,9 +172,10 @@ Keep the dependency on the route as well if it must be enforced for cache misses
 
 ## Conditional Requests
 
-Cached responses get an `ETag` header based on the response body. On a cache hit,
+Cached responses without an existing `ETag` get one based on the response body.
+If the endpoint already sets `ETag`, that value is preserved. On a cache hit,
 requests with a matching `If-None-Match` header return `304 Not Modified` with an
-empty body.
+empty body. `If-None-Match` supports weak tags, tag lists, and `*`.
 
 ```sh
 curl http://127.0.0.1:8000/cached -H 'If-None-Match: "..."'
@@ -206,4 +221,4 @@ The repository contains runnable examples:
 - `examples/invalidate.py`: custom key builder and manual invalidation after an
   update.
 
-Follow the detailed walkthrough in [`examples/README.md`](./examples/README.md).
+Follow the detailed walkthrough in the examples README.

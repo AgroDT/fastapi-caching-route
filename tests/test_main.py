@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import pytest
 from aiocache import SimpleMemoryCache
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.routing import APIRoute
 from fastapi_caching_route.main import CachingRoute, FastAPICache
 from starlette.testclient import TestClient
@@ -126,10 +126,29 @@ def _test_valid_etag_with_w(client: TestClient, etag: str) -> None:
     assert len(res.content) == content_len == 0
 
 
+def _test_valid_etag_in_list(client: TestClient, etag: str) -> None:
+    res = client.get('/cached', headers={'if-none-match': f'"invalid", W/{etag}'})
+    content_len = int(res.headers['content-length'])
+    assert res.status_code == 304
+    assert len(res.content) == content_len == 0
+
+
+def _test_valid_etag_with_wildcard(client: TestClient, _etag: str) -> None:
+    res = client.get('/cached', headers={'if-none-match': '*'})
+    content_len = int(res.headers['content-length'])
+    assert res.status_code == 304
+    assert len(res.content) == content_len == 0
+
+
 @pytest.mark.parametrize(
     'tester',
-    [_test_valid_etag, _test_invalid_etag, _test_valid_etag_with_w],
-    ids=['valid', 'invalid', 'valid with W/'],
+    [
+        pytest.param(_test_valid_etag, id='valid'),
+        pytest.param(_test_invalid_etag, id='invalid'),
+        pytest.param(_test_valid_etag_with_w, id='valid with W/'),
+        pytest.param(_test_valid_etag_in_list, id='valid in list'),
+        pytest.param(_test_valid_etag_with_wildcard, id='wildcard'),
+    ],
 )
 def test_etag(client: TestClient, tester: Callable[[TestClient, str], None]) -> None:
     res = client.get('/cached')
@@ -137,6 +156,92 @@ def test_etag(client: TestClient, tester: Callable[[TestClient, str], None]) -> 
     assert res.status_code == 200
     assert etag
     tester(client, etag)
+
+
+def test_endpoint_etag_is_preserved() -> None:
+    router = APIRouter(route_class=CachingRoute)
+    cache = FastAPICache(SimpleMemoryCache())
+
+    @cache()
+    @router.get('/')
+    def cached() -> Response:
+        return Response(content='Hello, World!', headers={'ETag': 'W/"custom"'})
+
+    app_ = FastAPI()
+    app_.include_router(router)
+    client = TestClient(app_)
+
+    res = client.get('/')
+    assert res.status_code == 200
+    assert res.headers['etag'] == 'W/"custom"'
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.get('/')
+    assert res.status_code == 200
+    assert res.headers['etag'] == 'W/"custom"'
+    assert res.headers['x-cache'] == 'HIT'
+
+    res = client.get('/', headers={'if-none-match': '"custom"'})
+    assert res.status_code == 304
+    assert res.headers['etag'] == 'W/"custom"'
+    assert not res.content
+
+
+def test_vary_headers_are_part_of_default_cache_key() -> None:
+    router = APIRouter(route_class=CachingRoute)
+    cache = FastAPICache(SimpleMemoryCache())
+    calls = {'count': 0}
+
+    @cache(vary_headers=['Accept-Language'])
+    @router.get('/')
+    def cached(request: Request) -> str:
+        calls['count'] += 1
+        return request.headers.get('accept-language', 'missing')
+
+    app_ = FastAPI()
+    app_.include_router(router)
+    client = TestClient(app_)
+
+    res = client.get('/', headers={'Accept-Language': 'en'})
+    assert res.text == '"en"'
+    assert res.headers['vary'] == 'accept-language'
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.get('/', headers={'Accept-Language': 'ru'})
+    assert res.text == '"ru"'
+    assert res.headers['vary'] == 'accept-language'
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.get('/', headers={'Accept-Language': 'en'})
+    assert res.text == '"en"'
+    assert res.headers['vary'] == 'accept-language'
+    assert res.headers['x-cache'] == 'HIT'
+    assert calls == {'count': 2}
+
+
+def test_vary_wildcard_response_is_not_cached() -> None:
+    router = APIRouter(route_class=CachingRoute)
+    cache = FastAPICache(SimpleMemoryCache())
+    calls = {'count': 0}
+
+    @cache()
+    @router.get('/')
+    def cached() -> Response:
+        calls['count'] += 1
+        return Response(content=str(calls['count']), headers={'Vary': '*'})
+
+    app_ = FastAPI()
+    app_.include_router(router)
+    client = TestClient(app_)
+
+    res = client.get('/')
+    assert res.text == '1'
+    assert 'x-cache' not in res.headers
+
+    res = client.get('/')
+    assert res.text == '2'
+    assert 'x-cache' not in res.headers
+    assert calls == {'count': 2}
 
 
 def test_query(client: TestClient) -> None:
