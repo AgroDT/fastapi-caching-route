@@ -399,6 +399,7 @@ def _key_builder_factory(params: Sequence[Any], vary_headers: Sequence[str]) -> 
 
     def _impl(request: Request) -> str:
         key = (
+            request.method,
             request.scope['path'],
             tuple((k, request.query_params.get(k, d)) for k, d in params_),
             tuple((h, request.headers.get(h, '')) for h in vary_headers),

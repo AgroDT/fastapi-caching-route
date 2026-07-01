@@ -244,6 +244,41 @@ def test_vary_wildcard_response_is_not_cached() -> None:
     assert calls == {'count': 2}
 
 
+def test_default_cache_key_includes_http_method() -> None:
+    router = APIRouter(route_class=CachingRoute)
+    cache = FastAPICache(SimpleMemoryCache())
+
+    @cache()
+    @router.get('/same')
+    def get_same() -> str:
+        return 'GET'
+
+    @cache()
+    @router.post('/same')
+    def post_same() -> str:
+        return 'POST'
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    res = client.get('/same')
+    assert res.text == '"GET"'
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.post('/same')
+    assert res.text == '"POST"'
+    assert res.headers['x-cache'] == 'MISS'
+
+    res = client.get('/same')
+    assert res.text == '"GET"'
+    assert res.headers['x-cache'] == 'HIT'
+
+    res = client.post('/same')
+    assert res.text == '"POST"'
+    assert res.headers['x-cache'] == 'HIT'
+
+
 def test_query(client: TestClient) -> None:
     res = client.get('/query', params={'a': 'a'})
     assert res.headers['x-cache'] == 'MISS'
